@@ -1150,3 +1150,91 @@
     display: none;
   }
 }
+
+/* Paste Options Dialog */
+.paste-options-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.paste-options-dialog {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  padding: 24px;
+  max-width: 450px;
+  width: 90%;
+  position: relative;
+  animation: slideIn 0.3s ease-out;
+}
+
+.paste-options-dialog button {
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  width: 100%;
+  padding: 16px;
+  margin-bottom: 8px;
+}
+
+.paste-options-dialog button:hover {
+  border-color: var(--editor-primary-color);
+  background: #f8f9fa;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.paste-options-dialog button:focus {
+  outline: 2px solid var(--editor-primary-color);
+  outline-offset: 2px;
+}
+
+.paste-options-dialog button:active {
+  transform: translateY(0);
+}
+
+/* Dark mode support for paste dialog */
+@media (prefers-color-scheme: dark) {
+  .paste-options-dialog {
+    background: #2d3748;
+    color: #e2e8f0;
+  }
+  
+  .paste-options-dialog button {
+    background: #4a5568;
+    border-color: #718096;
+    color: #e2e8f0;
+  }
+  
+  .paste-options-dialog button:hover {
+    background: #2d3748;
+    border-color: var(--editor-primary-color);
+  }
+}
+
+/* Mobile responsive paste dialog */
+@media (max-width: 768px) {
+  .paste-options-dialog {
+    margin: 20px;
+    padding: 20px;
+    max-width: none;
+    width: calc(100% - 40px);
+  }
+  
+  .paste-options-dialog button {
+    padding: 14px;
+    font-size: 14px;
+  }
+}

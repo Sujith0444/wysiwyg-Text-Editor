@@ -492,41 +492,38 @@ class WYSIWYGEditor {
   }
 
   setupEventListeners() {
-    // Focus management
-    this.editable.addEventListener('focus', () => {
+    // Store handler references for cleanup
+    this.handleFocus = () => {
       this.container.classList.add('focused');
-    });
+    };
     
-    this.editable.addEventListener('blur', () => {
+    this.handleBlur = () => {
       this.container.classList.remove('focused');
-    });
+    };
     
-    // Content change events
-    this.editable.addEventListener('input', () => {
+    this.handleInput = () => {
       this.recordHistory();
       this.updateFooter(); // Update footer counts
       this.autoSave();
-    });
+    };
     
-    this.editable.addEventListener('paste', (e) => {
+    this.handlePaste = (e) => {
       setTimeout(() => {
         this.recordHistory();
         this.updateFooter(); // Update footer counts
       }, 0);
-    });
+    };
     
-    // Keyboard events
-    this.editable.addEventListener('keydown', (e) => {
+    this.handleKeydown = (e) => {
       // Handle Enter key for new paragraphs
       if (e.key === 'Enter' && !e.shiftKey) {
         setTimeout(() => {
           this.updateFooter(); // Update footer counts
         }, 0);
       }
-    });
+    };
     
-    // Click events for toolbar buttons
-    this.toolbar.addEventListener('click', (e) => {
+    this.handleToolbarClick = (e) => {
       if (e.target.tagName === 'BUTTON') {
         e.preventDefault();
         const button = e.target;
@@ -539,7 +536,21 @@ class WYSIWYGEditor {
           this.updateFooter(); // Update footer counts
         }
       }
-    });
+    };
+
+    // Focus management
+    this.editable.addEventListener('focus', this.handleFocus);
+    this.editable.addEventListener('blur', this.handleBlur);
+    
+    // Content change events
+    this.editable.addEventListener('input', this.handleInput);
+    this.editable.addEventListener('paste', this.handlePaste);
+    
+    // Keyboard events
+    this.editable.addEventListener('keydown', this.handleKeydown);
+    
+    // Click events for toolbar buttons
+    this.toolbar.addEventListener('click', this.handleToolbarClick);
   }
 
   setupKeyboardShortcuts() {
@@ -596,7 +607,13 @@ class WYSIWYGEditor {
             break;
           case 'v':
             e.preventDefault();
-            this.pasteContent();
+            if (e.shiftKey) {
+              // Ctrl+Shift+V: Paste as plain text
+              this.handlePlainTextPaste();
+            } else {
+              // Ctrl+V: Paste with Word formatting
+              this.handleEnhancedPaste();
+            }
             break;
           case 'f':
             e.preventDefault();
@@ -653,37 +670,32 @@ class WYSIWYGEditor {
 
   setContent(html) {
     try {
-      // Check if the content looks like HTML but is being treated as text
-      if (html && typeof html === 'string' && html.includes('<') && html.includes('>')) {
-        // If the content contains HTML tags but the editor is showing them as text,
-        // it means the content was corrupted during code view toggle
-        const sanitized = this.sanitizeHTML(html);
-        this.editable.innerHTML = sanitized;
-        
-        // Ensure we're not in code view mode
-        if (this.state.isCodeView) {
-          this.state.isCodeView = false;
-          this.editable.classList.remove('code-view');
-          const codeBtn = document.getElementById('codeview');
-          if (codeBtn) {
-            codeBtn.classList.remove('active');
-            codeBtn.title = 'Code View';
-          }
-        }
-      } else {
-        // Normal content setting
-        const sanitized = this.sanitizeHTML(html);
-        this.editable.innerHTML = sanitized;
+      if (!html || typeof html !== 'string') {
+        console.warn('Invalid content provided to setContent:', html);
+        html = '<p>Start typing here...</p>';
       }
+
+      // Sanitize the HTML content
+      const sanitizedHTML = this.sanitizeHTML(html);
       
-      // Ensure proper structure after setting content
-      this.ensureProperStructure();
+      // Set the content
+      this.editable.innerHTML = sanitizedHTML;
       
-      // Update footer after content change
+      // Update footer counts
       this.updateFooter();
+      
+      // Record the change in history
+      this.recordHistory();
+      
+      // Show success notification
+      this.showNotification('Content updated successfully', 'success');
     } catch (error) {
       console.error('Failed to set content:', error);
-      this.showNotification('Failed to set content', 'error');
+      this.showNotification('Failed to set content. Please try again.', 'error');
+      
+      // Fallback to safe content
+      this.editable.innerHTML = '<p>Start typing here...</p>';
+      this.updateFooter();
     }
   }
 
@@ -994,20 +1006,49 @@ class WYSIWYGEditor {
   }
 
   destroy() {
-    // Cleanup
-    clearTimeout(this.debounceTimer);
-    clearTimeout(this.autoSaveTimer);
-    
-    if (this.observer) {
-      this.observer.disconnect();
+    try {
+      // Clear all timers
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+        this.debounceTimer = null;
+      }
+      if (this.autoSaveTimer) {
+        clearTimeout(this.autoSaveTimer);
+        this.autoSaveTimer = null;
+      }
+
+      // Remove all event listeners
+      if (this.editable) {
+        this.editable.removeEventListener('focus', this.handleFocus);
+        this.editable.removeEventListener('blur', this.handleBlur);
+        this.editable.removeEventListener('input', this.handleInput);
+        this.editable.removeEventListener('paste', this.handlePaste);
+        this.editable.removeEventListener('keydown', this.handleKeydown);
+      }
+
+      if (this.toolbar) {
+        this.toolbar.removeEventListener('click', this.handleToolbarClick);
+      }
+
+      // Remove observer if exists
+      if (this.observer) {
+        this.observer.disconnect();
+        this.observer = null;
+      }
+
+      // Clear container
+      if (this.container) {
+        this.container.innerHTML = '';
+      }
+
+      // Clear state
+      this.state = null;
+      this.config = null;
+      
+      this.showNotification('Editor destroyed successfully', 'info');
+    } catch (error) {
+      console.error('Error destroying editor:', error);
     }
-    
-    // Remove event listeners
-    this.editable.removeEventListener('input', this.debounce);
-    this.editable.removeEventListener('keydown', this.setupKeyboardShortcuts);
-    
-    // Clear container
-    this.container.innerHTML = '';
   }
 
   setLineHeight(value) {
@@ -1168,6 +1209,613 @@ class WYSIWYGEditor {
       }
     } catch (error) {
       this.showNotification('Failed to paste content', 'error');
+    }
+  }
+
+  showPasteOptionsDialog() {
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'paste-options-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    
+    // Create dialog container
+    const dialog = document.createElement('div');
+    dialog.className = 'paste-options-dialog';
+    dialog.style.cssText = `
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      padding: 20px;
+      max-width: 400px;
+      width: 90%;
+      position: relative;
+    `;
+    
+    // Create header
+    const header = document.createElement('div');
+    header.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    `;
+    
+    const title = document.createElement('h3');
+    title.textContent = 'Paste Options';
+    title.style.cssText = `
+      margin: 0;
+      font-size: 18px;
+      color: #333;
+    `;
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    
+    closeBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay);
+    });
+    
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    
+    // Create options
+    const optionsContainer = document.createElement('div');
+    optionsContainer.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    `;
+    
+    const pasteOptions = [
+      {
+        id: 'word-formatting',
+        title: '📄 Preserve Word Formatting',
+        description: 'Keep headings, styles, and formatting from Word documents',
+        action: () => this.handleEnhancedPaste()
+      },
+      {
+        id: 'keep-formatting',
+        title: '🎨 Keep Formatting',
+        description: 'Preserve basic formatting (bold, italic, colors)',
+        action: () => this.handleFormattedPaste()
+      },
+      {
+        id: 'plain-text',
+        title: '📝 Plain Text',
+        description: 'Remove all formatting and paste as plain text',
+        action: () => this.handlePlainTextPaste()
+      }
+    ];
+    
+    pasteOptions.forEach(option => {
+      const optionBtn = document.createElement('button');
+      optionBtn.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 15px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: left;
+        width: 100%;
+      `;
+      
+      optionBtn.addEventListener('mouseenter', () => {
+        optionBtn.style.borderColor = '#007bff';
+        optionBtn.style.backgroundColor = '#f8f9fa';
+      });
+      
+      optionBtn.addEventListener('mouseleave', () => {
+        optionBtn.style.borderColor = '#e9ecef';
+        optionBtn.style.backgroundColor = 'white';
+      });
+      
+      optionBtn.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+        option.action();
+      });
+      
+      const optionTitle = document.createElement('div');
+      optionTitle.textContent = option.title;
+      optionTitle.style.cssText = `
+        font-weight: 600;
+        font-size: 14px;
+        color: #333;
+        margin-bottom: 4px;
+      `;
+      
+      const optionDesc = document.createElement('div');
+      optionDesc.textContent = option.description;
+      optionDesc.style.cssText = `
+        font-size: 12px;
+        color: #6c757d;
+        line-height: 1.4;
+      `;
+      
+      optionBtn.appendChild(optionTitle);
+      optionBtn.appendChild(optionDesc);
+      optionsContainer.appendChild(optionBtn);
+    });
+    
+    // Add keyboard shortcuts info
+    const shortcutsInfo = document.createElement('div');
+    shortcutsInfo.style.cssText = `
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #eee;
+      font-size: 12px;
+      color: #6c757d;
+    `;
+    shortcutsInfo.innerHTML = `
+      <strong>Keyboard Shortcuts:</strong><br>
+      • Ctrl+V: Paste with Word formatting<br>
+      • Ctrl+Shift+V: Paste as plain text
+    `;
+    
+    dialog.appendChild(header);
+    dialog.appendChild(optionsContainer);
+    dialog.appendChild(shortcutsInfo);
+    overlay.appendChild(dialog);
+    
+    // Add to page
+    document.body.appendChild(overlay);
+    
+    // Handle escape key
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        document.body.removeChild(overlay);
+        document.removeEventListener('keydown', handleEscape);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    
+    // Focus first option
+    setTimeout(() => {
+      const firstOption = optionsContainer.querySelector('button');
+      if (firstOption) firstOption.focus();
+    }, 100);
+  }
+
+  handleFormattedPaste() {
+    // Create a temporary paste handler for formatted content
+    const handlePaste = (e) => {
+      e.preventDefault();
+      
+      let html = '';
+      let text = '';
+      
+      // Get clipboard data
+      if (e.clipboardData) {
+        html = e.clipboardData.getData('text/html');
+        text = e.clipboardData.getData('text/plain');
+      } else if (window.clipboardData) {
+        html = window.clipboardData.getData('text/html');
+        text = window.clipboardData.getData('text/plain');
+      }
+      
+      // Use HTML if available, otherwise use plain text
+      const content = html || text;
+      this.insertProcessedContent(content);
+      
+      // Remove the temporary handler
+      this.editable.removeEventListener('paste', handlePaste);
+    };
+    
+    // Add temporary paste handler
+    this.editable.addEventListener('paste', handlePaste);
+    
+    // Trigger paste
+    document.execCommand('paste');
+  }
+
+  handlePlainTextPaste() {
+    // Create a temporary paste handler for plain text
+    const handlePaste = (e) => {
+      e.preventDefault();
+      
+      let text = '';
+      
+      // Get clipboard data
+      if (e.clipboardData) {
+        text = e.clipboardData.getData('text/plain');
+      } else if (window.clipboardData) {
+        text = window.clipboardData.getData('text/plain');
+      }
+      
+      // Insert as plain text
+      document.execCommand('insertText', false, text);
+      this.recordHistory();
+      this.updateFooter();
+      this.showNotification('Plain text pasted successfully', 'success');
+      
+      // Remove the temporary handler
+      this.editable.removeEventListener('paste', handlePaste);
+    };
+    
+    // Add temporary paste handler
+    this.editable.addEventListener('paste', handlePaste);
+    
+    // Trigger paste
+    document.execCommand('paste');
+  }
+
+  handleEnhancedPaste() {
+    // Create a temporary paste handler
+    const handlePaste = (e) => {
+      e.preventDefault();
+      
+      let html = '';
+      let text = '';
+      
+      // Get clipboard data
+      if (e.clipboardData) {
+        html = e.clipboardData.getData('text/html');
+        text = e.clipboardData.getData('text/plain');
+      } else if (window.clipboardData) {
+        // IE fallback
+        html = window.clipboardData.getData('text/html');
+        text = window.clipboardData.getData('text/plain');
+      }
+      
+      // Process the pasted content
+      const processedContent = this.processWordContent(html, text);
+      
+      // Insert the processed content
+      this.insertProcessedContent(processedContent);
+      
+      // Remove the temporary handler
+      this.editable.removeEventListener('paste', handlePaste);
+    };
+    
+    // Add temporary paste handler
+    this.editable.addEventListener('paste', handlePaste);
+    
+    // Trigger paste
+    document.execCommand('paste');
+  }
+
+  processWordContent(html, text) {
+    // If no HTML, return plain text
+    if (!html || html.trim() === '') {
+      return text;
+    }
+    
+    // Create temporary container to process HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    
+    // Process Word-specific formatting
+    this.processWordFormatting(tempDiv);
+    
+    // Convert Word styles to editor-compatible styles
+    this.convertWordStyles(tempDiv);
+    
+    // Clean up the processed HTML
+    const processedHTML = this.cleanupProcessedHTML(tempDiv.innerHTML);
+    
+    return processedHTML;
+  }
+
+  processWordFormatting(container) {
+    // Process Word headings (MsoNormal with specific styles)
+    const wordElements = container.querySelectorAll('[class*="Mso"], [style*="mso-"]');
+    
+    wordElements.forEach(element => {
+      // Convert Word headings
+      this.convertWordHeading(element);
+      
+      // Convert Word lists
+      this.convertWordList(element);
+      
+      // Convert Word tables
+      this.convertWordTable(element);
+      
+      // Convert Word styles
+      this.convertWordInlineStyles(element);
+    });
+    
+    // Process style attributes for Word formatting
+    const styledElements = container.querySelectorAll('[style]');
+    styledElements.forEach(element => {
+      this.processWordStyleAttributes(element);
+    });
+  }
+
+  convertWordHeading(element) {
+    const style = element.getAttribute('style') || '';
+    const className = element.getAttribute('class') || '';
+    
+    // Word heading patterns
+    const headingPatterns = [
+      { pattern: /mso-style-name:\s*["']?Heading\s*1["']?/i, tag: 'h1' },
+      { pattern: /mso-style-name:\s*["']?Heading\s*2["']?/i, tag: 'h2' },
+      { pattern: /mso-style-name:\s*["']?Heading\s*3["']?/i, tag: 'h3' },
+      { pattern: /mso-style-name:\s*["']?Heading\s*4["']?/i, tag: 'h4' },
+      { pattern: /mso-style-name:\s*["']?Heading\s*5["']?/i, tag: 'h5' },
+      { pattern: /mso-style-name:\s*["']?Heading\s*6["']?/i, tag: 'h6' },
+      { pattern: /font-size:\s*(\d+)pt/i, tag: 'h1', condition: (size) => size >= 24 },
+      { pattern: /font-size:\s*(\d+)pt/i, tag: 'h2', condition: (size) => size >= 18 && size < 24 },
+      { pattern: /font-size:\s*(\d+)pt/i, tag: 'h3', condition: (size) => size >= 14 && size < 18 }
+    ];
+    
+    for (const pattern of headingPatterns) {
+      const match = style.match(pattern.pattern);
+      if (match) {
+        if (pattern.condition) {
+          const size = parseInt(match[1]);
+          if (pattern.condition(size)) {
+            this.convertToHeading(element, pattern.tag);
+            return;
+          }
+        } else {
+          this.convertToHeading(element, pattern.tag);
+          return;
+        }
+      }
+    }
+    
+    // Check for bold text with large font size (likely headings)
+    if (style.includes('font-weight: bold') || className.includes('MsoHeading')) {
+      const fontSizeMatch = style.match(/font-size:\s*(\d+)pt/i);
+      if (fontSizeMatch) {
+        const size = parseInt(fontSizeMatch[1]);
+        if (size >= 16) {
+          this.convertToHeading(element, 'h2');
+          return;
+        }
+      }
+    }
+  }
+
+  convertToHeading(element, headingTag) {
+    const newElement = document.createElement(headingTag);
+    newElement.innerHTML = element.innerHTML;
+    
+    // Preserve important styles
+    const preservedStyles = ['color', 'text-align', 'font-family'];
+    preservedStyles.forEach(style => {
+      if (element.style[style]) {
+        newElement.style[style] = element.style[style];
+      }
+    });
+    
+    element.parentNode.replaceChild(newElement, element);
+  }
+
+  convertWordList(element) {
+    const style = element.getAttribute('style') || '';
+    const className = element.getAttribute('class') || '';
+    
+    // Check for Word list indicators
+    if (style.includes('mso-list') || className.includes('MsoList')) {
+      const listType = this.detectListType(element);
+      if (listType) {
+        this.convertToList(element, listType);
+      }
+    }
+  }
+
+  detectListType(element) {
+    const style = element.getAttribute('style') || '';
+    const className = element.getAttribute('class') || '';
+    
+    // Check for ordered list indicators
+    if (style.includes('mso-list: l') || className.includes('MsoListNumber')) {
+      return 'ol';
+    }
+    
+    // Check for unordered list indicators
+    if (style.includes('mso-list: l0') || className.includes('MsoListBullet')) {
+      return 'ul';
+    }
+    
+    return null;
+  }
+
+  convertToList(element, listType) {
+    const listElement = document.createElement(listType);
+    const listItem = document.createElement('li');
+    listItem.innerHTML = element.innerHTML;
+    listElement.appendChild(listItem);
+    
+    element.parentNode.replaceChild(listElement, element);
+  }
+
+  convertWordTable(element) {
+    if (element.tagName.toLowerCase() === 'table' || 
+        element.getAttribute('class')?.includes('MsoTable')) {
+      // Clean up Word table formatting
+      this.cleanupWordTable(element);
+    }
+  }
+
+  cleanupWordTable(table) {
+    // Remove Word-specific table attributes
+    const wordAttributes = ['border', 'cellspacing', 'cellpadding', 'width'];
+    wordAttributes.forEach(attr => {
+      if (table.hasAttribute(attr)) {
+        table.removeAttribute(attr);
+      }
+    });
+    
+    // Clean up table cells
+    const cells = table.querySelectorAll('td, th');
+    cells.forEach(cell => {
+      // Remove Word-specific cell attributes
+      const cellAttributes = ['width', 'height', 'valign'];
+      cellAttributes.forEach(attr => {
+        if (cell.hasAttribute(attr)) {
+          cell.removeAttribute(attr);
+        }
+      });
+    });
+  }
+
+  convertWordInlineStyles(element) {
+    const style = element.getAttribute('style') || '';
+    
+    // Convert Word font styles
+    if (style.includes('font-weight: bold')) {
+      element.style.fontWeight = 'bold';
+    }
+    
+    if (style.includes('font-style: italic')) {
+      element.style.fontStyle = 'italic';
+    }
+    
+    if (style.includes('text-decoration: underline')) {
+      element.style.textDecoration = 'underline';
+    }
+    
+    // Convert font sizes from pt to px
+    const fontSizeMatch = style.match(/font-size:\s*(\d+)pt/i);
+    if (fontSizeMatch) {
+      const ptSize = parseInt(fontSizeMatch[1]);
+      const pxSize = Math.round(ptSize * 1.33); // Convert pt to px
+      element.style.fontSize = `${pxSize}px`;
+    }
+    
+    // Convert colors
+    const colorMatch = style.match(/color:\s*([^;]+)/i);
+    if (colorMatch) {
+      element.style.color = colorMatch[1].trim();
+    }
+  }
+
+  processWordStyleAttributes(element) {
+    let style = element.getAttribute('style') || '';
+    
+    // Remove Word-specific style properties
+    const wordStylePatterns = [
+      /mso-[^:]+:[^;]+;?/gi,
+      /mso-[^;]+;?/gi,
+      /font-family:\s*["']?Calibri["']?[^;]*;?/gi,
+      /font-family:\s*["']?Times New Roman["']?[^;]*;?/gi,
+      /font-family:\s*["']?Arial["']?[^;]*;?/gi
+    ];
+    
+    wordStylePatterns.forEach(pattern => {
+      style = style.replace(pattern, '');
+    });
+    
+    // Clean up multiple semicolons and spaces
+    style = style.replace(/;+/g, ';').replace(/;\s*;/g, ';').trim();
+    
+    if (style && style !== ';') {
+      element.setAttribute('style', style);
+    } else {
+      element.removeAttribute('style');
+    }
+  }
+
+  convertWordStyles(container) {
+    // Convert common Word styles to editor styles
+    const styleMappings = {
+      'MsoNormal': 'p',
+      'MsoHeading1': 'h1',
+      'MsoHeading2': 'h2',
+      'MsoHeading3': 'h3',
+      'MsoHeading4': 'h4',
+      'MsoHeading5': 'h5',
+      'MsoHeading6': 'h6',
+      'MsoListBullet': 'ul',
+      'MsoListNumber': 'ol'
+    };
+    
+    Object.entries(styleMappings).forEach(([wordClass, htmlTag]) => {
+      const elements = container.querySelectorAll(`.${wordClass}`);
+      elements.forEach(element => {
+        const newElement = document.createElement(htmlTag);
+        newElement.innerHTML = element.innerHTML;
+        element.parentNode.replaceChild(newElement, element);
+      });
+    });
+  }
+
+  cleanupProcessedHTML(html) {
+    // Remove any remaining Word-specific markup
+    html = html.replace(/<!--\[if.*?\]>.*?<!\[endif\]-->/gs, '');
+    html = html.replace(/<o:p[^>]*>.*?<\/o:p>/gs, '');
+    html = html.replace(/<w:[^>]*>.*?<\/w:[^>]*>/gs, '');
+    html = html.replace(/<m:[^>]*>.*?<\/m:[^>]*>/gs, '');
+    
+    // Clean up empty elements
+    html = html.replace(/<[^>]*>\s*<\/[^>]*>/g, '');
+    
+    // Remove multiple line breaks
+    html = html.replace(/\n\s*\n/g, '\n');
+    
+    return html.trim();
+  }
+
+  insertProcessedContent(content) {
+    try {
+      // Get current selection
+      const selection = window.getSelection();
+      const range = selection.getRangeAt(0);
+      
+      // Delete selected content if any
+      if (!range.collapsed) {
+        range.deleteContents();
+      }
+      
+      // Create a temporary container to parse the content
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      
+      // Insert the processed content
+      const fragment = document.createDocumentFragment();
+      while (tempDiv.firstChild) {
+        fragment.appendChild(tempDiv.firstChild);
+      }
+      
+      range.insertNode(fragment);
+      
+      // Move cursor to end of inserted content
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      // Update editor state
+      this.recordHistory();
+      this.updateFooter();
+      
+      this.showNotification('Content pasted with formatting preserved', 'success');
+    } catch (error) {
+      console.error('Error inserting processed content:', error);
+      // Fallback to simple text insertion
+      document.execCommand('insertText', false, content);
+      this.recordHistory();
+      this.updateFooter();
     }
   }
 
@@ -1600,10 +2248,10 @@ class WYSIWYGEditor {
     // Calculate various metrics
     const charCount = content.length;
     const charCountNoSpaces = content.replace(/\s/g, '').length;
-    const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+    const wordCount = this.countWords(content); // Use the same method as footer
     const sentenceCount = content.split(/[.!?]+/).filter(sentence => sentence.trim().length > 0).length;
     const paragraphCount = htmlContent.split(/<\/p>|<\/div>/).filter(p => p.trim().length > 0).length;
-    const lineCount = content.split('\n').filter(line => line.trim().length > 0).length;
+    const lineCount = this.countLines(content); // Use the same method as footer
     
     // Calculate reading time (average 200 words per minute)
     const readingTimeMinutes = Math.ceil(wordCount / 200);
@@ -1864,10 +2512,19 @@ class WYSIWYGEditor {
       // Check if jsPDF is available
       if (typeof jsPDF === 'undefined') {
         this.showNotification('PDF export requires jsPDF library. Please include jsPDF in your project.', 'error');
+        // Provide alternative: offer to download as HTML
+        if (confirm('PDF export is not available. Would you like to download as HTML instead?')) {
+          this.exportAsHTML();
+        }
         return;
       }
 
       const content = this.getText();
+      if (!content.trim()) {
+        this.showNotification('No content to export. Please add some text first.', 'warning');
+        return;
+      }
+
       const doc = new jsPDF();
       
       // Set font and size
@@ -1890,7 +2547,32 @@ class WYSIWYGEditor {
       this.showNotification('PDF exported successfully!', 'success');
     } catch (error) {
       console.error('PDF export failed:', error);
-      this.showNotification('PDF export failed. Please try again.', 'error');
+      this.showNotification(`PDF export failed: ${error.message}. Please try again.`, 'error');
+    }
+  }
+
+  // Helper method for HTML export as fallback
+  exportAsHTML() {
+    try {
+      const content = this.getContent();
+      const blob = new Blob([content], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      const filename = `document_${timestamp}.html`;
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      URL.revokeObjectURL(url);
+      this.showNotification('HTML exported successfully!', 'success');
+    } catch (error) {
+      console.error('HTML export failed:', error);
+      this.showNotification('HTML export failed. Please try again.', 'error');
     }
   }
 
